@@ -282,6 +282,7 @@ class ExpApp(App):
         Binding("ctrl+s", "save", "Save", priority=True),
         Binding("q", "quit_save", "Quit"),
         Binding("ctrl+q", "quit_save", "Quit", show=False, priority=True),
+        Binding("ctrl+c", "quit_save", "Quit", show=False, priority=True),
     ]
 
     def __init__(self, path: Path, model: str = "") -> None:
