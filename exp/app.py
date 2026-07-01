@@ -27,6 +27,13 @@ from textual.widgets import Footer, Markdown, Static, TextArea
 
 STREAM_LIMIT = 10 * 1024 * 1024  # single stream-json lines can be large
 
+# Environment for every `claude -p` invocation. Explicit values here take
+# precedence over the inherited environment.
+CLAUDE_ENV = {
+    "AWS_REGION": "us-east-1",
+    "ANTHROPIC_MODEL": "us.anthropic.claude-fable-5",
+}
+
 STATUS_ICON = {
     "idle": "○",
     "running": "◐",
@@ -466,6 +473,7 @@ class ExpApp(App):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 limit=STREAM_LIMIT,
+                env={**os.environ, **CLAUDE_ENV},
             )
         except OSError as exc:
             cell.status, cell.note = "error", str(exc)
