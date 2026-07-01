@@ -147,6 +147,10 @@ class PromptArea(TextArea):
         Binding("alt+right,alt+f", "cursor_word_right", "word right", show=False),
         Binding("alt+shift+left", "cursor_word_left(True)", "select word left", show=False),
         Binding("alt+shift+right", "cursor_word_right(True)", "select word right", show=False),
+        # Cmd+Delete arrives as super+backspace in terminals that forward it
+        # (kitty keyboard protocol). Whole-line delete, per user preference,
+        # rather than TextArea's default delete-to-start-of-line.
+        Binding("super+backspace", "delete_line", "delete line", show=False),
     ]
 
     def __init__(self, cell: Cell) -> None:
