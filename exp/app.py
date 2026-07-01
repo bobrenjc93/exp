@@ -259,7 +259,9 @@ class ModelScreen(ModalScreen[str | None]):
         height: auto;
         padding: 1 2;
         border: round $accent;
-        background: $panel;
+        /* $background, not $panel: stays opaque on ansi themes where
+           panel/surface resolve to transparent */
+        background: $background;
     }
     #model-dialog OptionList {
         height: auto;
@@ -366,8 +368,9 @@ class ExpApp(App):
 
     def __init__(self, path: Path, model: str = "") -> None:
         super().__init__()
-        # light by default; EXP_THEME accepts any textual theme name
-        self.theme = os.environ.get("EXP_THEME", "textual-light")
+        # ansi-light keeps the terminal's own background (no painted color);
+        # EXP_THEME accepts any textual theme name
+        self.theme = os.environ.get("EXP_THEME", "ansi-light")
         self.path = path
         # precedence: --model flag > EXP_MODEL > notebook's saved model
         self.model = model or os.environ.get("EXP_MODEL", "")

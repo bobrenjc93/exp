@@ -74,9 +74,10 @@ AWS_REGION=us-east-1 ANTHROPIC_MODEL="us.anthropic.claude-fable-5" exp
 
 ## Theme
 
-Light mode by default. Set `EXP_THEME` to any
+By default exp paints no background at all — it uses your terminal's own
+colors (the `ansi-light` theme). Set `EXP_THEME` to any
 [textual theme](https://textual.textualize.io/guide/design/) name to change
-it, e.g. `EXP_THEME=textual-dark exp` or `EXP_THEME=nord exp`.
+it, e.g. `EXP_THEME=textual-light exp` or `EXP_THEME=nord exp`.
 
 ## Install
 
