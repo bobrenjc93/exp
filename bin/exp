@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Launcher for exp — runs the TUI from its project venv.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+exec "$ROOT/.venv/bin/python" -m exp.app "$@"
