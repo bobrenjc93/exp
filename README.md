@@ -28,7 +28,8 @@ exp ideas.exp      # open/create a specific notebook
 | --- | --- |
 | `↑` / `↓` | Move between cells |
 | `←` | Collapse cell's children (or jump to parent) |
-| `→` | Expand collapsed children |
+| `→` | Expand collapsed children / unfold a folded cell |
+| `f` | Fold/unfold the cell itself (one-line summary) |
 | `Enter` | Edit the selected cell's prompt |
 | `Esc` | Stop editing (back to command mode) |
 | `Ctrl+R` | Run the selected cell (works while editing too) |
@@ -37,16 +38,30 @@ exp ideas.exp      # open/create a specific notebook
 | `o` | New nested cell (continues this cell's session) |
 | `d` | Delete cell (and its children) |
 | `k` | Kill a running cell |
+| `m` | Set the model for new runs |
 | `Ctrl+S` | Save |
 | `q` | Save and quit |
 
-## Extra claude flags
+## Choosing a model
 
-Set `EXP_CLAUDE_ARGS` to pass extra flags to every invocation, e.g.:
+The model can be set (highest precedence first) via:
+
+1. `exp --model claude-haiku-4-5-20251001`
+2. `EXP_MODEL=claude-haiku-4-5-20251001 exp`
+3. the `m` key inside the app (saved with the notebook)
+
+If none is set, `claude` uses its own default. The header bar shows the
+model in effect, and each cell shows the model that actually served its
+last run.
+
+Environment variables are passed through to `claude`, so provider config
+works as usual:
 
 ```
-EXP_CLAUDE_ARGS="--model claude-haiku-4-5-20251001" exp
+AWS_REGION=us-east-1 ANTHROPIC_MODEL="us.anthropic.claude-fable-5" exp
 ```
+
+`EXP_CLAUDE_ARGS` passes arbitrary extra flags to every invocation.
 
 ## Install
 

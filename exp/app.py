@@ -23,16 +23,11 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
-from textual.widgets import Footer, Markdown, Static, TextArea
+from textual.screen import ModalScreen
+from textual.widgets import Footer, Input, Label, Markdown, Static, TextArea
 
 STREAM_LIMIT = 10 * 1024 * 1024  # single stream-json lines can be large
 
-# Environment for every `claude -p` invocation. Explicit values here take
-# precedence over the inherited environment.
-CLAUDE_ENV = {
-    "AWS_REGION": "us-east-1",
-    "ANTHROPIC_MODEL": "us.anthropic.claude-fable-5",
-}
 
 STATUS_ICON = {
     "idle": "○",
@@ -51,7 +46,9 @@ class Cell:
     status: str = "idle"
     note: str = ""  # duration/cost or error summary
     session_id: str | None = None
-    collapsed: bool = False
+    model: str = ""  # model that actually served the last run
+    collapsed: bool = False  # children hidden
+    folded: bool = False  # cell body (prompt/output) hidden, children too
     children: list["Cell"] = field(default_factory=list)
     parent: "Cell | None" = None
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
@@ -82,7 +79,9 @@ class Cell:
             "status": "idle" if self.status == "running" else self.status,
             "note": self.note,
             "session_id": self.session_id,
+            "model": self.model,
             "collapsed": self.collapsed,
+            "folded": self.folded,
             "children": [c.to_dict() for c in self.children],
         }
 
@@ -94,7 +93,9 @@ class Cell:
             status=data.get("status", "idle"),
             note=data.get("note", ""),
             session_id=data.get("session_id"),
+            model=data.get("model", ""),
             collapsed=data.get("collapsed", False),
+            folded=data.get("folded", False),
             parent=parent,
         )
         cell.children = [cls.from_dict(c, cell) for c in data.get("children", [])]
@@ -125,12 +126,22 @@ class CellWidget(Vertical):
 
     def on_mount(self) -> None:
         self._fit_prompt_height()
-        self.query_one(Markdown).display = bool(self.cell.output)
+        self._apply_fold()
+
+    def _apply_fold(self) -> None:
+        folded = self.cell.folded
+        self.query_one(PromptArea).display = not folded
+        self.query_one(Markdown).display = not folded and bool(self.cell.output)
 
     def _header_text(self) -> str:
         cell = self.cell
         icon = STATUS_ICON.get(cell.status, "?")
         parts = [f"{icon} {cell.status}"]
+        if cell.folded:
+            summary = " ".join(cell.prompt.split())
+            parts.append(f"⊞ {summary[:60] + '…' if len(summary) > 60 else summary or '(empty)'}")
+        if cell.model:
+            parts.append(cell.model)
         if cell.note:
             parts.append(cell.note)
         if cell.session_id:
@@ -138,7 +149,7 @@ class CellWidget(Vertical):
         if cell.parent is not None:
             parts.append("↳ continues parent")
         if cell.children:
-            marker = "▸" if cell.collapsed else "▾"
+            marker = "▸" if (cell.collapsed or cell.folded) else "▾"
             parts.append(f"{marker} {len(cell.children)} child(ren)")
         return "  ·  ".join(parts)
 
@@ -148,9 +159,8 @@ class CellWidget(Vertical):
 
     def refresh_from_cell(self) -> None:
         self.query_one(".cell-header", Static).update(self._header_text())
-        output = self.query_one(Markdown)
-        output.display = bool(self.cell.output)
-        output.update(self.cell.output)
+        self._apply_fold()
+        self.query_one(Markdown).update(self.cell.output)
         self.set_class(self.cell.status == "running", "running")
         self.set_class(self.cell.status == "error", "errored")
 
@@ -158,6 +168,43 @@ class CellWidget(Vertical):
     def _prompt_changed(self, event: TextArea.Changed) -> None:
         self.cell.prompt = event.text_area.text
         self._fit_prompt_height()
+
+
+class ModelScreen(ModalScreen[str | None]):
+    """Prompt for a model name; empty submits claude's default."""
+
+    AUTO_FOCUS = "Input"
+
+    CSS = """
+    ModelScreen {
+        align: center middle;
+    }
+    #model-dialog {
+        width: 70;
+        height: auto;
+        padding: 1 2;
+        border: round $accent;
+        background: $panel;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+
+    def __init__(self, current: str) -> None:
+        super().__init__()
+        self.current = current
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="model-dialog"):
+            yield Label("Model for new runs (empty = claude default, Esc = cancel)")
+            yield Input(value=self.current, placeholder="e.g. claude-haiku-4-5-20251001")
+
+    @on(Input.Submitted)
+    def _submit(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip())
 
 
 # --------------------------------------------------------------------------- app
@@ -205,8 +252,9 @@ class ExpApp(App):
     BINDINGS = [
         Binding("up", "select_prev", "↑/↓ navigate", show=True),
         Binding("down", "select_next", "", show=False),
-        Binding("left", "collapse", "◂ fold", show=False),
-        Binding("right", "expand", "▸ unfold", show=False),
+        Binding("left", "collapse", "◂ fold children", show=False),
+        Binding("right", "expand", "▸ unfold children", show=False),
+        Binding("f", "toggle_fold", "Fold cell"),
         Binding("enter", "edit", "Edit"),
         Binding("escape", "leave_edit", "Done editing", show=False, priority=True),
         Binding("ctrl+r", "run", "Run", priority=True),
@@ -215,14 +263,18 @@ class ExpApp(App):
         Binding("o", "add_child", "+Nested cell"),
         Binding("d", "delete", "Delete"),
         Binding("k", "cancel_run", "Kill run", show=False),
+        Binding("m", "set_model", "Model"),
         Binding("ctrl+s", "save", "Save", priority=True),
         Binding("q", "quit_save", "Quit"),
         Binding("ctrl+q", "quit_save", "Quit", show=False, priority=True),
     ]
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, model: str = "") -> None:
         super().__init__()
         self.path = path
+        # precedence: --model flag > EXP_MODEL > notebook's saved model
+        self.model = model or os.environ.get("EXP_MODEL", "")
+        self._model_from_cli = bool(self.model)
         self.roots: list[Cell] = []
         self.selected: Cell | None = None
         self.cell_widgets: dict[str, CellWidget] = {}
@@ -236,13 +288,22 @@ class ExpApp(App):
         if self.path.exists():
             data = json.loads(self.path.read_text())
             self.roots = [Cell.from_dict(c) for c in data.get("cells", [])]
+            if not self._model_from_cli:
+                self.model = data.get("model", "")
         if not self.roots:
             self.roots = [Cell()]
         self.selected = self.roots[0]
 
     def save(self) -> None:
         self.path.write_text(
-            json.dumps({"version": 1, "cells": [c.to_dict() for c in self.roots]}, indent=2)
+            json.dumps(
+                {
+                    "version": 1,
+                    "model": self.model,
+                    "cells": [c.to_dict() for c in self.roots],
+                },
+                indent=2,
+            )
         )
         self.dirty = False
         self._update_title()
@@ -252,7 +313,8 @@ class ExpApp(App):
         self._update_title()
 
     def _update_title(self) -> None:
-        self.title = f"exp — {self.path.name}{' *' if self.dirty else ''}"
+        model = self.model or os.environ.get("ANTHROPIC_MODEL", "") or "claude default"
+        self.title = f"exp — {self.path.name}{' *' if self.dirty else ''} · {model}"
 
     # ---------------------------------------------------------------- layout
 
@@ -271,7 +333,7 @@ class ExpApp(App):
 
         def visit(cell: Cell) -> None:
             out.append(cell)
-            if not cell.collapsed:
+            if not cell.collapsed and not cell.folded:
                 for child in cell.children:
                     visit(child)
 
@@ -339,20 +401,51 @@ class ExpApp(App):
 
     def action_expand(self) -> None:
         cell = self.selected
-        if cell and cell.children and cell.collapsed:
+        if cell is None:
+            return
+        if cell.folded:
+            self.action_toggle_fold()
+        elif cell.children and cell.collapsed:
             cell.collapsed = False
             self.rebuild()
+
+    def action_toggle_fold(self) -> None:
+        cell = self.selected
+        if cell is None:
+            return
+        cell.folded = not cell.folded
+        self.mark_dirty()
+        if cell.children:
+            self.rebuild()
+        else:
+            self.update_cell_view(cell)
+        self._apply_selection()
 
     # ---------------------------------------------------------------- editing
 
     def action_edit(self) -> None:
         if self.selected is None:
             return
-        widget = self.cell_widgets.get(self.selected.id)
+        if self.selected.folded:
+            self.action_toggle_fold()
+            self.call_after_refresh(self._focus_prompt)
+        else:
+            self._focus_prompt()
+
+    def _focus_prompt(self) -> None:
+        widget = self.cell_widgets.get(self.selected.id) if self.selected else None
         if widget is not None:
             area = widget.query_one(PromptArea)
             area.focus()
             area.move_cursor(area.document.end)
+
+    def check_action(self, action: str, parameters) -> bool:
+        # App-level priority bindings must not swallow keys meant for modals.
+        if isinstance(self.screen, ModelScreen):
+            return False
+        if action == "leave_edit":
+            return isinstance(self.focused, PromptArea)
+        return True
 
     def action_leave_edit(self) -> None:
         if isinstance(self.focused, PromptArea):
@@ -442,6 +535,16 @@ class ExpApp(App):
             return
         self._run_cell(cell)
 
+    def action_set_model(self) -> None:
+        def apply(model: str | None) -> None:
+            if model is None:
+                return
+            self.model = model
+            self.mark_dirty()
+            self.notify(f"Model for new runs: {model or 'claude default'}")
+
+        self.push_screen(ModelScreen(self.model), apply)
+
     def action_cancel_run(self) -> None:
         cell = self.selected
         if cell and cell.id in self.procs:
@@ -460,9 +563,12 @@ class ExpApp(App):
         resume = cell.ancestor_session()
         if resume:
             cmd += ["--resume", resume, "--fork-session"]
+        if self.model:
+            cmd += ["--model", self.model]
         cmd += shlex.split(os.environ.get("EXP_CLAUDE_ARGS", ""))
 
         cell.status, cell.note, cell.output, cell.session_id = "running", "", "", None
+        cell.model = ""
         self.update_cell_view(cell)
         self.mark_dirty()
 
@@ -473,7 +579,6 @@ class ExpApp(App):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 limit=STREAM_LIMIT,
-                env={**os.environ, **CLAUDE_ENV},
             )
         except OSError as exc:
             cell.status, cell.note = "error", str(exc)
@@ -497,6 +602,7 @@ class ExpApp(App):
                 etype = event.get("type")
                 if etype == "system" and event.get("subtype") == "init":
                     cell.session_id = event.get("session_id")
+                    cell.model = event.get("model", "")
                 elif etype == "assistant":
                     for block in event.get("message", {}).get("content", []):
                         if block.get("type") == "text" and block.get("text"):
@@ -558,8 +664,14 @@ def main() -> None:
         default="notebook.exp",
         help="notebook file to open or create (default: ./notebook.exp)",
     )
+    parser.add_argument(
+        "--model",
+        default="",
+        help="model to pass to claude --model (also settable via EXP_MODEL "
+        "or the 'm' key in the app; default: claude's own default)",
+    )
     args = parser.parse_args()
-    ExpApp(Path(args.notebook)).run()
+    ExpApp(Path(args.notebook), model=args.model).run()
 
 
 if __name__ == "__main__":

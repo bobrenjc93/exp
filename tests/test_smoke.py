@@ -60,15 +60,45 @@ async def run_pilot(tmp: Path):
         app.roots[1].session_id = "abc-123"
         assert child.ancestor_session() == "abc-123"
 
+        # fold the parent cell itself: body and subtree hidden
+        assert app.selected is app.roots[1]
+        await pilot.press("f")
+        assert app.roots[1].folded
+        assert child not in app.visible_cells()
+        widget = app.cell_widgets[app.roots[1].id]
+        assert not widget.query_one("PromptArea").display
+        # right unfolds a folded cell (rebuild recreates the widget)
+        await pilot.press("right")
+        assert not app.roots[1].folded
+        assert child in app.visible_cells()
+        widget = app.cell_widgets[app.roots[1].id]
+        assert widget.query_one("PromptArea").display
+        # enter on a folded cell unfolds and edits
+        await pilot.press("f", "enter")
+        assert not app.roots[1].folded
+        await pilot.press("escape")
+
+        # model configuration via the m modal
+        await pilot.press("m")
+        await pilot.press(*"claude-test-model")
+        await pilot.press("enter")
+        assert app.model == "claude-test-model"
+        assert "claude-test-model" in app.title
+        # escape cancels without changing the model
+        await pilot.press("m")
+        await pilot.press("escape")
+        assert app.model == "claude-test-model"
+
         # delete the child
         await pilot.press("down", "d")
         assert app.roots[1].children == []
         assert app.selected is app.roots[1]
 
-        # save and reload round-trip
+        # save and reload round-trip (including the configured model)
         app.save()
         data = json.loads(nb.read_text())
         assert [c["prompt"] for c in data["cells"]] == ["hello world", "second"]
+        assert data["model"] == "claude-test-model"
         reloaded = [Cell.from_dict(c) for c in data["cells"]]
         assert reloaded[0].prompt == "hello world"
 
