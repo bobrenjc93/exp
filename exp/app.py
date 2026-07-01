@@ -112,6 +112,20 @@ class PromptArea(TextArea):
         self.cell = cell
         self.show_line_numbers = False
 
+    def on_key(self, event) -> None:
+        # While the prompt is still empty (e.g. right after `o`/`a`),
+        # left/right adjust the cell's indentation instead of moving the
+        # cursor, so `o` then `←` turns the new child into a sibling.
+        if not self.text and event.key in ("left", "right"):
+            event.prevent_default()
+            event.stop()
+            app = self.app
+            app.select(self.cell)
+            if event.key == "left":
+                app.action_dedent(keep_editing=True)
+            else:
+                app.action_indent(keep_editing=True)
+
 
 class CellWidget(Vertical):
     def __init__(self, cell: Cell) -> None:
@@ -252,8 +266,9 @@ class ExpApp(App):
     BINDINGS = [
         Binding("up", "select_prev", "↑/↓ navigate", show=True),
         Binding("down", "select_next", "", show=False),
-        Binding("left", "collapse", "◂ fold children", show=False),
-        Binding("right", "expand", "▸ unfold children", show=False),
+        Binding("left", "dedent", "◂ dedent", show=False),
+        Binding("right", "indent", "▸ indent", show=False),
+        Binding("c", "toggle_children", "Fold children", show=False),
         Binding("f", "toggle_fold", "Fold cell"),
         Binding("enter", "edit", "Edit"),
         Binding("escape", "leave_edit", "Done editing", show=False, priority=True),
@@ -389,25 +404,50 @@ class ExpApp(App):
     def action_select_next(self) -> None:
         self._move_selection(1)
 
-    def action_collapse(self) -> None:
+    def action_toggle_children(self) -> None:
         cell = self.selected
-        if cell is None:
-            return
-        if cell.children and not cell.collapsed:
-            cell.collapsed = True
+        if cell and cell.children:
+            cell.collapsed = not cell.collapsed
             self.rebuild()
-        elif cell.parent is not None:
-            self.select(cell.parent)
 
-    def action_expand(self) -> None:
+    def _reindent(self, cell: Cell, new_parent: Cell | None, index: int, keep_editing: bool) -> None:
+        old_siblings = cell.parent.children if cell.parent else self.roots
+        old_siblings.remove(cell)
+        cell.parent = new_parent
+        siblings = new_parent.children if new_parent else self.roots
+        siblings.insert(index, cell)
+        self.mark_dirty()
+        self.rebuild()
+        self.select(cell)
+        if keep_editing:
+            self.call_after_refresh(self._focus_prompt)
+        if cell.status != "idle":
+            self.notify("Cell re-parented — a re-run will continue the new parent's session.")
+
+    def action_dedent(self, keep_editing: bool = False) -> None:
+        cell = self.selected
+        if cell is None or cell.parent is None:
+            return
+        # become the next sibling of the old parent
+        parent = cell.parent
+        grandparent = parent.parent
+        target = grandparent.children if grandparent else self.roots
+        self._reindent(cell, grandparent, target.index(parent) + 1, keep_editing)
+
+    def action_indent(self, keep_editing: bool = False) -> None:
         cell = self.selected
         if cell is None:
             return
         if cell.folded:
             self.action_toggle_fold()
-        elif cell.children and cell.collapsed:
-            cell.collapsed = False
-            self.rebuild()
+            return
+        siblings = cell.parent.children if cell.parent else self.roots
+        idx = siblings.index(cell)
+        if idx == 0:
+            return  # no previous sibling to become a child of
+        new_parent = siblings[idx - 1]
+        new_parent.collapsed = new_parent.folded = False
+        self._reindent(cell, new_parent, len(new_parent.children), keep_editing)
 
     def action_toggle_fold(self) -> None:
         cell = self.selected

@@ -49,18 +49,42 @@ async def run_pilot(tmp: Path):
         await pilot.press("down", "down")
         assert app.selected is child
 
-        # left collapses the parent, hiding the child
-        await pilot.press("up", "left")
+        # c folds/unfolds the parent's children
+        await pilot.press("up", "c")
         assert app.roots[1].collapsed
         assert child not in app.visible_cells()
-        await pilot.press("right")
+        await pilot.press("c")
         assert not app.roots[1].collapsed
+
+        # left dedents the child to top level, right re-indents it
+        await pilot.press("down")
+        assert app.selected is child
+        await pilot.press("left")
+        assert child.parent is None
+        assert app.roots == [app.roots[0], app.roots[1], child]
+        await pilot.press("right")
+        assert child.parent is app.roots[1]
+        assert app.roots[1].children == [child]
+
+        # o then left: brand-new child becomes a sibling while still editing
+        await pilot.press("up", "o")
+        new_cell = app.roots[1].children[-1]
+        await pilot.press("left")
+        assert new_cell.parent is None
+        assert new_cell in app.roots
+        await pilot.press(*"promoted")
+        assert new_cell.prompt == "promoted"
+        await pilot.press("escape", "d")
+        assert new_cell not in app.roots
+        await pilot.press("down")
+        assert app.selected is child
 
         # session inheritance plumbing
         app.roots[1].session_id = "abc-123"
         assert child.ancestor_session() == "abc-123"
 
         # fold the parent cell itself: body and subtree hidden
+        await pilot.press("up")
         assert app.selected is app.roots[1]
         await pilot.press("f")
         assert app.roots[1].folded

@@ -20,6 +20,11 @@ exp ideas.exp      # open/create a specific notebook
   parent are independent forks — branch an experiment as many ways as you
   like.
 - Top-level cells are fresh, independent sessions.
+- `←`/`→` re-indent a cell (Workflowy-style). Because nesting decides which
+  session a cell continues, re-indenting a cell changes what context its
+  *next* run sees — existing output is kept but a re-run uses the new
+  parent's session. Right after `o` or `a`, while the empty prompt is
+  focused, `←`/`→` re-indent the new cell directly.
 - Notebooks are plain JSON (`.exp` files), saved automatically on quit.
 
 ## Keys
@@ -27,8 +32,9 @@ exp ideas.exp      # open/create a specific notebook
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` | Move between cells |
-| `←` | Collapse cell's children (or jump to parent) |
-| `→` | Expand collapsed children / unfold a folded cell |
+| `←` | Dedent: cell becomes a sibling of its parent |
+| `→` | Indent: cell becomes a child of the cell above (or unfolds a folded cell) |
+| `c` | Collapse/expand the cell's children |
 | `f` | Fold/unfold the cell itself (one-line summary) |
 | `Enter` | Edit the selected cell's prompt |
 | `Esc` | Stop editing (back to command mode) |
