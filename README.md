@@ -72,6 +72,12 @@ AWS_REGION=us-east-1 ANTHROPIC_MODEL="us.anthropic.claude-fable-5" exp
 
 `EXP_CLAUDE_ARGS` passes arbitrary extra flags to every invocation.
 
+## Theme
+
+Light mode by default. Set `EXP_THEME` to any
+[textual theme](https://textual.textualize.io/guide/design/) name to change
+it, e.g. `EXP_THEME=textual-dark exp` or `EXP_THEME=nord exp`.
+
 ## Install
 
 ```

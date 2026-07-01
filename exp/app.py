@@ -366,6 +366,8 @@ class ExpApp(App):
 
     def __init__(self, path: Path, model: str = "") -> None:
         super().__init__()
+        # light by default; EXP_THEME accepts any textual theme name
+        self.theme = os.environ.get("EXP_THEME", "textual-light")
         self.path = path
         # precedence: --model flag > EXP_MODEL > notebook's saved model
         self.model = model or os.environ.get("EXP_MODEL", "")
