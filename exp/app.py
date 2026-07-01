@@ -139,6 +139,16 @@ class Cell:
 class PromptArea(TextArea):
     """The editable prompt of a cell."""
 
+    # macOS-style Option+arrow word movement. Terminals send Option+arrow as
+    # alt+left/right or as Esc b / Esc f (seen as alt+b / alt+f). Option+
+    # Backspace (alt+backspace -> delete word) is already bound by TextArea.
+    BINDINGS = [
+        Binding("alt+left,alt+b", "cursor_word_left", "word left", show=False),
+        Binding("alt+right,alt+f", "cursor_word_right", "word right", show=False),
+        Binding("alt+shift+left", "cursor_word_left(True)", "select word left", show=False),
+        Binding("alt+shift+right", "cursor_word_right(True)", "select word right", show=False),
+    ]
+
     def __init__(self, cell: Cell) -> None:
         super().__init__(cell.prompt, soft_wrap=True, tab_behavior="focus")
         self.cell = cell
