@@ -24,9 +24,41 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Input, Label, Markdown, Static, TextArea
+from textual.suggester import SuggestFromList
+from textual.widgets import Footer, Input, Label, Markdown, OptionList, Static, TextArea
 
 STREAM_LIMIT = 10 * 1024 * 1024  # single stream-json lines can be large
+
+
+def describe_tool_use(block: dict) -> str:
+    """One-line summary of a tool_use block, e.g. `⚙ Bash: git status`."""
+    name = block.get("name", "tool")
+    inputs = block.get("input") or {}
+    # the most informative field per tool, falling back to common keys
+    for key in {
+        "Bash": ["command"],
+        "Skill": ["skill", "args"],
+        "Task": ["description"],
+        "Agent": ["description"],
+        "WebFetch": ["url"],
+        "WebSearch": ["query"],
+        "Grep": ["pattern"],
+        "Glob": ["pattern"],
+    }.get(name, []) + ["file_path", "path", "description", "prompt", "query", "command"]:
+        value = inputs.get(key)
+        if value:
+            detail = " ".join(str(value).split())
+            if key == "skill" and inputs.get("args"):
+                detail += f" {inputs['args']}"
+            if len(detail) > 120:
+                detail = detail[:120] + "…"
+            return f"⚙ `{name}: {detail}`"
+    if inputs:
+        detail = " ".join(json.dumps(inputs).split())
+        if len(detail) > 120:
+            detail = detail[:120] + "…"
+        return f"⚙ `{name}: {detail}`"
+    return ""  # bare tool name with no arguments — not worth a line
 
 
 STATUS_ICON = {
@@ -184,8 +216,23 @@ class CellWidget(Vertical):
         self._fit_prompt_height()
 
 
+# The claude CLI has no command to enumerate models, so this is a curated
+# list of aliases/ids it accepts; models observed in the notebook are added
+# at runtime and free-form input is always allowed.
+KNOWN_MODELS = [
+    "fable",
+    "opus",
+    "sonnet",
+    "haiku",
+    "claude-fable-5",
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5-20251001",
+]
+
+
 class ModelScreen(ModalScreen[str | None]):
-    """Prompt for a model name; empty submits claude's default."""
+    """Pick a model from known ones or type any; empty = claude's default."""
 
     AUTO_FOCUS = "Input"
 
@@ -200,25 +247,43 @@ class ModelScreen(ModalScreen[str | None]):
         border: round $accent;
         background: $panel;
     }
+    #model-dialog OptionList {
+        height: auto;
+        max-height: 12;
+        margin-top: 1;
+    }
     """
 
     BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
 
-    def __init__(self, current: str) -> None:
+    def __init__(self, current: str, extra_models: list[str] = ()) -> None:
         super().__init__()
         self.current = current
+        self.models = list(dict.fromkeys([*extra_models, *KNOWN_MODELS]))
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="model-dialog"):
-            yield Label("Model for new runs (empty = claude default, Esc = cancel)")
-            yield Input(value=self.current, placeholder="e.g. claude-haiku-4-5-20251001")
+            yield Label(
+                "Model for new runs — type any model id or pick below "
+                "(empty = claude default, Esc = cancel)"
+            )
+            yield Input(
+                value=self.current,
+                placeholder="e.g. haiku",
+                suggester=SuggestFromList(self.models, case_sensitive=False),
+            )
+            yield OptionList(*self.models)
 
     @on(Input.Submitted)
     def _submit(self, event: Input.Submitted) -> None:
         self.dismiss(event.value.strip())
+
+    @on(OptionList.OptionSelected)
+    def _pick(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(str(event.option.prompt))
 
 
 # --------------------------------------------------------------------------- app
@@ -584,7 +649,9 @@ class ExpApp(App):
             self.mark_dirty()
             self.notify(f"Model for new runs: {model or 'claude default'}")
 
-        self.push_screen(ModelScreen(self.model), apply)
+        # models this notebook has actually used surface at the top of the list
+        seen = [c.model for r in self.roots for c in r.walk() if c.model]
+        self.push_screen(ModelScreen(self.model, list(dict.fromkeys(seen))), apply)
 
     def action_cancel_run(self) -> None:
         cell = self.selected
@@ -649,7 +716,9 @@ class ExpApp(App):
                         if block.get("type") == "text" and block.get("text"):
                             transcript.append(block["text"])
                         elif block.get("type") == "tool_use":
-                            transcript.append(f"*⚙ {block.get('name', 'tool')}*")
+                            summary = describe_tool_use(block)
+                            if summary:
+                                transcript.append(summary)
                 elif etype == "result":
                     result_event = event
                     cell.session_id = event.get("session_id", cell.session_id)

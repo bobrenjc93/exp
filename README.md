@@ -54,7 +54,10 @@ The model can be set (highest precedence first) via:
 
 1. `exp --model claude-haiku-4-5-20251001`
 2. `EXP_MODEL=claude-haiku-4-5-20251001 exp`
-3. the `m` key inside the app (saved with the notebook)
+3. the `m` key inside the app (saved with the notebook) — pick from a list
+   of known model aliases plus any models this notebook has used, with
+   tab-completion, or type any model id (the claude CLI has no command to
+   enumerate models, so the list is curated rather than fetched)
 
 If none is set, `claude` uses its own default. The header bar shows the
 model in effect, and each cell shows the model that actually served its
